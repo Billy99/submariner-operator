@@ -22,13 +22,17 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/submariner-io/admiral/pkg/test"
 	submariner_v1 "github.com/submariner-io/submariner-operator/api/submariner/v1alpha1"
+	"github.com/submariner-io/submariner-operator/controllers/resource"
+	"github.com/submariner-io/submariner-operator/controllers/servicediscovery"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var _ = Describe("Service discovery controller", func() {
 	Context("Reconciliation", testReconciliation)
+	Context("Deletion", testDeletion)
 })
 
 func testReconciliation() {
@@ -183,6 +187,26 @@ func testReconciliation() {
 					strings.ReplaceAll(lighthouseDNSConfigFormat, "$IP", clusterIP)))
 			})
 		})
+	})
+}
+
+func testDeletion() {
+	t := newTestDriver()
+
+	BeforeEach(func() {
+		t.serviceDiscovery.SetFinalizers([]string{servicediscovery.ServiceDiscoveryFinalizer})
+
+		now := metav1.Now()
+		t.serviceDiscovery.SetDeletionTimestamp(&now)
+	})
+
+	JustBeforeEach(func() {
+		t.assertReconcileSuccess()
+	})
+
+	It("should remove the finalizer from the Submariner resource", func() {
+		test.AwaitNoFinalizer(resource.ForControllerClient(t.fakeClient, submarinerNamespace, &submariner_v1.ServiceDiscovery{}),
+			serviceDiscoveryName, servicediscovery.ServiceDiscoveryFinalizer)
 	})
 }
 
