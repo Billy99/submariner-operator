@@ -15,56 +15,42 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
 package show
 
 import (
 	"fmt"
+	"io"
 
-	"github.com/spf13/cobra"
-	"github.com/submariner-io/submariner-operator/internal/cli"
-	"github.com/submariner-io/submariner-operator/pkg/subctl/cmd"
+	"github.com/submariner-io/submariner-operator/internal/constants"
+	"github.com/submariner-io/submariner-operator/pkg/cluster"
+	"github.com/submariner-io/submariner-operator/pkg/reporter"
 )
 
-func init() {
-	showCmd.AddCommand(&cobra.Command{
-		Use:   "all",
-		Short: "Show information related to a submariner cluster",
-		Long: `This command shows information related to a submariner cluster:
-		      networks, endpoints, gateways, connections and component versions.`,
-		PreRunE: restConfigProducer.CheckVersionMismatch,
-		Run: func(command *cobra.Command, args []string) {
-			cmd.ExecuteMultiCluster(restConfigProducer, showAll)
-		},
-	})
-}
-
-func showAll(cluster *cmd.Cluster) bool {
-	status := cli.NewStatus()
-
-	if cluster.Submariner == nil {
-		status.Start(cmd.SubmMissingMessage)
-		status.EndWith(cli.Warning)
+func All(newCluster *cluster.Info, status reporter.Interface, writer io.Writer) bool {
+	if newCluster.Submariner == nil {
+		status.Warning(constants.SubmMissingMessage)
 
 		return true
 	}
 
-	success := showConnections(cluster)
+	success := Connections(newCluster, status, writer)
 
 	fmt.Println()
 
-	success = showEndpoints(cluster) && success
+	success = Endpoints(newCluster, status, writer) && success
 
 	fmt.Println()
 
-	success = showGateways(cluster) && success
+	success = Gateways(newCluster, status, writer) && success
 
 	fmt.Println()
 
-	success = showNetwork(cluster) && success
+	success = Network(newCluster, status, writer) && success
 
 	fmt.Println()
 
-	success = showVersions(cluster) && success
+	success = Versions(newCluster, status, writer) && success
 
 	return success
 }

@@ -15,14 +15,16 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
 package show
 
 import (
 	"fmt"
+	"io"
 
-	"github.com/spf13/cobra"
-	"github.com/submariner-io/submariner-operator/internal/cli"
-	"github.com/submariner-io/submariner-operator/pkg/subctl/cmd"
+	"github.com/submariner-io/submariner-operator/internal/constants"
+	"github.com/submariner-io/submariner-operator/pkg/cluster"
+	"github.com/submariner-io/submariner-operator/pkg/reporter"
 )
 
 type endpointStatus struct {
@@ -43,30 +45,27 @@ func newEndpointsStatusFrom(clusterID, endpointIP, publicIP, cableDriver, endpoi
 	}
 }
 
-func init() {
-	showCmd.AddCommand(&cobra.Command{
-		Use:     "endpoints",
-		Short:   "Show submariner endpoint information",
-		Long:    `This command shows information about submariner endpoints in a cluster.`,
-		PreRunE: restConfigProducer.CheckVersionMismatch,
-		Run: func(command *cobra.Command, args []string) {
-			cmd.ExecuteMultiCluster(restConfigProducer, showEndpoints)
-		},
-	})
+func Endpoints(newCluster *cluster.Info, status reporter.Interface, writer io.Writer) bool {
+	if newCluster.Submariner == nil {
+		status.Warning(constants.SubmMissingMessage)
+
+		return true
+	}
+
+	return getEndpointsStatus(newCluster, status, writer)
 }
 
-func getEndpointsStatus(cluster *cmd.Cluster) bool {
-	status := cli.NewStatus()
+func getEndpointsStatus(newCluster *cluster.Info, status reporter.Interface, writer io.Writer) bool {
 	status.Start("Showing Endpoints")
 
-	gateways, err := cluster.GetGateways()
+	gateways, err := newCluster.GetGateways()
 	if err != nil {
-		status.EndWithFailure("Error retrieving gateways: %v", err)
+		status.Failure("Error retrieving gateways: %v", err)
 		return false
 	}
 
 	if len(gateways) == 0 {
-		status.EndWithFailure("There are no gateways detected")
+		status.Failure("There are no gateways detected")
 		return false
 	}
 
@@ -93,36 +92,23 @@ func getEndpointsStatus(cluster *cmd.Cluster) bool {
 	}
 
 	if len(epStatus) == 0 {
-		status.EndWithFailure("No Endpoints found")
+		status.Failure("No Endpoints found")
 		return false
 	}
 
-	status.EndWith(cli.Success)
-	printEndpoints(epStatus)
+	status.End()
+	printEndpoints(epStatus, writer)
 
 	return true
 }
 
-func showEndpoints(cluster *cmd.Cluster) bool {
-	status := cli.NewStatus()
-
-	if cluster.Submariner == nil {
-		status.Start(cmd.SubmMissingMessage)
-		status.EndWith(cli.Warning)
-
-		return true
-	}
-
-	return getEndpointsStatus(cluster)
-}
-
-func printEndpoints(endpoints []endpointStatus) {
+func printEndpoints(endpoints []endpointStatus, writer io.Writer) {
 	template := "%-30.29s%-16.15s%-16.15s%-20.19s%-16.15s\n"
 
-	fmt.Printf(template, "CLUSTER ID", "ENDPOINT IP", "PUBLIC IP", "CABLE DRIVER", "TYPE")
+	fmt.Fprintf(writer, template, "CLUSTER ID", "ENDPOINT IP", "PUBLIC IP", "CABLE DRIVER", "TYPE")
 
 	for _, item := range endpoints {
-		fmt.Printf(
+		fmt.Fprintf(writer,
 			template,
 			item.clusterID,
 			item.endpointIP,

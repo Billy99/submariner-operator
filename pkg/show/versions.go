@@ -15,43 +15,79 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
 package show
 
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/pkg/errors"
-	"github.com/spf13/cobra"
 	"github.com/submariner-io/submariner-operator/api/submariner/v1alpha1"
-	"github.com/submariner-io/submariner-operator/internal/cli"
-	"github.com/submariner-io/submariner-operator/internal/exit"
-	submarinerclientset "github.com/submariner-io/submariner-operator/pkg/client/clientset/versioned"
+	"github.com/submariner-io/submariner-operator/internal/constants"
+	operatorclientset "github.com/submariner-io/submariner-operator/pkg/client/clientset/versioned"
+	"github.com/submariner-io/submariner-operator/pkg/cluster"
 	"github.com/submariner-io/submariner-operator/pkg/images"
 	"github.com/submariner-io/submariner-operator/pkg/names"
-	"github.com/submariner-io/submariner-operator/pkg/subctl/cmd"
-	"github.com/submariner-io/submariner-operator/pkg/subctl/operator/submarinercr"
+	"github.com/submariner-io/submariner-operator/pkg/reporter"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
-func init() {
-	showCmd.AddCommand(&cobra.Command{
-		Use:     "versions",
-		Short:   "Shows submariner component versions",
-		Long:    `This command shows the versions of the submariner components in the cluster.`,
-		PreRunE: restConfigProducer.CheckVersionMismatch,
-		Run: func(command *cobra.Command, args []string) {
-			cmd.ExecuteMultiCluster(restConfigProducer, showVersions)
-		},
-	})
-}
-
 type versionImageInfo struct {
 	component  string
 	repository string
 	version    string
+}
+
+func Versions(newCluster *cluster.Info, status reporter.Interface, writer io.Writer) bool {
+	if newCluster.Submariner == nil {
+		status.Warning(constants.SubmMissingMessage)
+
+		return true
+	}
+
+	return getVersions(newCluster, status, writer)
+}
+
+func getVersions(newCluster *cluster.Info, status reporter.Interface, writer io.Writer) bool {
+	status.Start("Showing versions")
+
+	var versions []versionImageInfo
+
+	versions = getSubmarinerVersion(newCluster.Submariner, versions)
+
+	versions, err := getOperatorVersion(newCluster.ClientProducer.ForKubernetes(), versions)
+	if err != nil {
+		status.Failure("Unable to get the Operator version %s", err)
+		return false
+	}
+
+	versions, err = getServiceDiscoveryVersions(newCluster.ClientProducer.ForOperator(), versions)
+	if err != nil {
+		status.Failure("Unable to get the Service-Discovery version %s", err)
+		return false
+	}
+
+	status.End()
+	printVersions(versions, writer)
+
+	return true
+}
+
+func printVersions(versions []versionImageInfo, writer io.Writer) {
+	template := "%-32.31s%-54.53s%-16.15s\n"
+	_, _ = fmt.Fprintf(writer, template, "COMPONENT", "REPOSITORY", "VERSION")
+
+	for _, item := range versions {
+		_, _ = fmt.Fprintf(writer,
+			template,
+			item.component,
+			item.repository,
+			item.version)
+	}
 }
 
 func newVersionInfoFrom(repository, component, version string) versionImageInfo {
@@ -63,12 +99,13 @@ func newVersionInfoFrom(repository, component, version string) versionImageInfo 
 }
 
 func getSubmarinerVersion(submariner *v1alpha1.Submariner, versions []versionImageInfo) []versionImageInfo {
-	versions = append(versions, newVersionInfoFrom(submariner.Spec.Repository, submarinercr.SubmarinerName, submariner.Spec.Version))
+	versions = append(versions, newVersionInfoFrom(submariner.Spec.Repository, constants.SubmarinerName, submariner.Spec.Version))
 	return versions
 }
 
 func getOperatorVersion(clientSet kubernetes.Interface, versions []versionImageInfo) ([]versionImageInfo, error) {
-	operatorConfig, err := clientSet.AppsV1().Deployments(cmd.OperatorNamespace).Get(context.TODO(), names.OperatorComponent, v1.GetOptions{})
+	operatorConfig, err := clientSet.AppsV1().Deployments(constants.OperatorNamespace).
+		Get(context.TODO(), names.OperatorComponent, v1.GetOptions{})
 	if err != nil {
 		return nil, errors.Wrap(err, "error retrieving Deployment")
 	}
@@ -80,8 +117,8 @@ func getOperatorVersion(clientSet kubernetes.Interface, versions []versionImageI
 	return versions, nil
 }
 
-func getServiceDiscoveryVersions(submarinerClient submarinerclientset.Interface, versions []versionImageInfo) ([]versionImageInfo, error) {
-	lighthouseAgentConfig, err := submarinerClient.SubmarinerV1alpha1().ServiceDiscoveries(cmd.OperatorNamespace).Get(
+func getServiceDiscoveryVersions(operatorClient operatorclientset.Interface, versions []versionImageInfo) ([]versionImageInfo, error) {
+	lighthouseAgentConfig, err := operatorClient.SubmarinerV1alpha1().ServiceDiscoveries(constants.OperatorNamespace).Get(
 		context.TODO(), names.ServiceDiscoveryCrName, v1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -95,52 +132,4 @@ func getServiceDiscoveryVersions(submarinerClient submarinerclientset.Interface,
 		lighthouseAgentConfig.Spec.Version))
 
 	return versions, nil
-}
-
-func getVersions(cluster *cmd.Cluster) bool {
-	status := cli.NewStatus()
-	status.Start("Showing versions")
-
-	var versions []versionImageInfo
-	submarinerClient, err := submarinerclientset.NewForConfig(cluster.Config)
-	exit.OnErrorWithMessage(err, "Unable to get the Submariner client")
-
-	versions = getSubmarinerVersion(cluster.Submariner, versions)
-
-	versions, err = getOperatorVersion(cluster.KubeClient, versions)
-	exit.OnErrorWithMessage(err, "Unable to get the Operator version")
-
-	versions, err = getServiceDiscoveryVersions(submarinerClient, versions)
-	exit.OnErrorWithMessage(err, "Unable to get the Service-Discovery version")
-
-	printVersions(versions)
-	status.EndWith(cli.Success)
-
-	return true
-}
-
-func showVersions(cluster *cmd.Cluster) bool {
-	status := cli.NewStatus()
-
-	if cluster.Submariner == nil {
-		status.Start(cmd.SubmMissingMessage)
-		status.EndWith(cli.Warning)
-
-		return true
-	}
-
-	return getVersions(cluster)
-}
-
-func printVersions(versions []versionImageInfo) {
-	template := "%-32.31s%-54.53s%-16.15s\n"
-	fmt.Printf(template, "COMPONENT", "REPOSITORY", "VERSION")
-
-	for _, item := range versions {
-		fmt.Printf(
-			template,
-			item.component,
-			item.repository,
-			item.version)
-	}
 }

@@ -15,14 +15,16 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
 package show
 
 import (
 	"fmt"
+	"io"
 
-	"github.com/spf13/cobra"
-	"github.com/submariner-io/submariner-operator/internal/cli"
-	"github.com/submariner-io/submariner-operator/pkg/subctl/cmd"
+	"github.com/submariner-io/submariner-operator/internal/constants"
+	"github.com/submariner-io/submariner-operator/pkg/cluster"
+	"github.com/submariner-io/submariner-operator/pkg/reporter"
 	submv1 "github.com/submariner-io/submariner/pkg/apis/submariner.io/v1"
 )
 
@@ -32,30 +34,27 @@ type gatewayStatus struct {
 	summary  string
 }
 
-func init() {
-	showCmd.AddCommand(&cobra.Command{
-		Use:     "gateways",
-		Short:   "Show submariner gateway summary information",
-		Long:    `This command shows summary information about the submariner gateways in a cluster.`,
-		PreRunE: restConfigProducer.CheckVersionMismatch,
-		Run: func(command *cobra.Command, args []string) {
-			cmd.ExecuteMultiCluster(restConfigProducer, showGateways)
-		},
-	})
+func Gateways(newCluster *cluster.Info, status reporter.Interface, writer io.Writer) bool {
+	if newCluster.Submariner == nil {
+		status.Warning(constants.SubmMissingMessage)
+
+		return true
+	}
+
+	return getGatewaysStatus(newCluster, status, writer)
 }
 
-func getGatewaysStatus(cluster *cmd.Cluster) bool {
-	status := cli.NewStatus()
+func getGatewaysStatus(newCluster *cluster.Info, status reporter.Interface, writer io.Writer) bool {
 	status.Start("Showing Gateways")
 
-	gateways, err := cluster.GetGateways()
+	gateways, err := newCluster.GetGateways()
 	if err != nil {
-		status.EndWithFailure("Error retrieving gateways: %v", err)
+		status.Failure("Error retrieving gateways: %v", err)
 		return false
 	}
 
 	if len(gateways) == 0 {
-		status.EndWithFailure("There are no gateways detected")
+		status.Failure("There are no gateways detected")
 		return false
 	}
 
@@ -94,35 +93,22 @@ func getGatewaysStatus(cluster *cmd.Cluster) bool {
 	}
 
 	if len(gwStatus) == 0 {
-		status.EndWithFailure("No Gateways found")
+		status.Failure("No Gateways found")
 		return false
 	}
 
-	status.EndWith(cli.Success)
-	printGateways(gwStatus)
+	status.End()
+	printGateways(gwStatus, writer)
 
 	return true
 }
 
-func showGateways(cluster *cmd.Cluster) bool {
-	status := cli.NewStatus()
-
-	if cluster.Submariner == nil {
-		status.Start(cmd.SubmMissingMessage)
-		status.EndWith(cli.Warning)
-
-		return true
-	}
-
-	return getGatewaysStatus(cluster)
-}
-
-func printGateways(gateways []gatewayStatus) {
+func printGateways(gateways []gatewayStatus, writer io.Writer) {
 	template := "%-32.31s%-16s%-32s\n"
-	fmt.Printf(template, "NODE", "HA STATUS", "SUMMARY")
+	fmt.Fprintf(writer, template, "NODE", "HA STATUS", "SUMMARY")
 
 	for _, item := range gateways {
-		fmt.Printf(
+		fmt.Fprintf(writer,
 			template,
 			item.node,
 			item.haStatus,
