@@ -39,19 +39,19 @@ import (
 //go:embed layout.gohtml
 var layout string
 
-func gatherClusterSummary(info *Info) {
-	dataGathered := getClusterInfo(info)
-	file := createFile(info.DirName)
-	writeToHTML(file, &dataGathered)
+func gatherClusterSummary(info *Info, writer io.Writer) {
+	dataGathered := getClusterInfo(info, writer)
+	file := createFile(info.DirName, writer)
+	writeToHTML(file, &dataGathered, writer)
 }
 
-func getClusterInfo(info *Info) data {
-	versions := getVersions(info)
-	config := getClusterConfig(info)
+func getClusterInfo(info *Info, writer io.Writer) data {
+	versions := getVersions(info, writer)
+	config := getClusterConfig(info, writer)
 
 	nConfig, err := getNodeConfig(info)
 	if err != nil {
-		fmt.Println(err)
+		_, _ = fmt.Fprintln(writer, err)
 	}
 
 	d := data{
@@ -66,20 +66,20 @@ func getClusterInfo(info *Info) data {
 	return d
 }
 
-func getClusterConfig(info *Info) clusterConfig {
+func getClusterConfig(info *Info, writer io.Writer) clusterConfig {
 	gwNodes, err := getGWNodes(info)
 	if err != nil {
-		fmt.Println(err)
+		_, _ = fmt.Fprintln(writer, err)
 	}
 
 	mNodes, err := getMasterNodes(info)
 	if err != nil {
-		fmt.Println(err)
+		_, _ = fmt.Fprintln(writer, err)
 	}
 
 	allNodes, err := listNodes(info, metav1.ListOptions{})
 	if err != nil {
-		fmt.Println(err)
+		_, _ = fmt.Fprintln(writer, err)
 	}
 
 	config := clusterConfig{
@@ -100,14 +100,14 @@ func getClusterConfig(info *Info) clusterConfig {
 	return config
 }
 
-func getVersions(info *Info) version {
+func getVersions(info *Info, writer io.Writer) version {
 	Versions := version{
 		Subctl: subctlversion.Version,
 	}
 
 	k8sServerVersion, err := info.ClientProducer.ForKubernetes().Discovery().ServerVersion()
 	if err != nil {
-		fmt.Println("error in getting k8s server version", err)
+		_, _ = fmt.Fprintln(writer, "error in getting k8s server version", err)
 		Versions.K8sServer = err.Error()
 	}
 
@@ -136,7 +136,7 @@ func getSpecificNode(info *Info, selector string) (map[string]types.UID, error) 
 }
 
 func getGWNodes(info *Info) (map[string]types.UID, error) {
-	selector := labels.SelectorFromSet(labels.Set(map[string]string{"submariner.io/gateway": "true"}))
+	selector := labels.SelectorFromSet(map[string]string{"submariner.io/gateway": "true"})
 
 	nodes, err := getSpecificNode(info, selector.String())
 	if err != nil {
@@ -216,22 +216,22 @@ func listNodes(info *Info, listOptions metav1.ListOptions) (*v1.NodeList, error)
 	return nodes, nil
 }
 
-func createFile(dirname string) io.Writer {
+func createFile(dirname string, writer io.Writer) io.Writer {
 	fileName := filepath.Join(dirname, "summary.html")
 
 	f, err := os.OpenFile(fileName, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o666)
 	if err != nil {
-		fmt.Printf("Error creating file %s\n", fileName)
+		_, _ = fmt.Fprintf(writer, "Error creating file %s\n", fileName)
 	}
 
 	return f
 }
 
-func writeToHTML(fileWriter io.Writer, cData *data) {
+func writeToHTML(fileWriter io.Writer, cData *data, writer io.Writer) {
 	t := template.Must(template.New("layout.html").Parse(layout))
 
 	err := t.Execute(fileWriter, cData)
 	if err != nil {
-		fmt.Println(err)
+		_, _ = fmt.Fprintln(writer, err)
 	}
 }
