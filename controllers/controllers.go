@@ -35,12 +35,13 @@ func AddToManager(mgr manager.Manager) error {
 	operatorClient, _ := operatorclient.NewClient(mgr.GetConfig())
 
 	if err := submariner.NewReconciler(&submariner.Config{
-		Client:     mgr.GetClient(),
-		RestConfig: mgr.GetConfig(),
-		Scheme:     mgr.GetScheme(),
-		KubeClient: kubeClient,
-		SubmClient: submarinerclientset.NewForConfigOrDie(mgr.GetConfig()),
-		DynClient:  dynamic.NewForConfigOrDie(mgr.GetConfig()),
+		Client:         mgr.GetClient(),
+		RestConfig:     mgr.GetConfig(),
+		Scheme:         mgr.GetScheme(),
+		KubeClient:     kubeClient,
+		SubmClient:     submarinerclientset.NewForConfigOrDie(mgr.GetConfig()),
+		DynClient:      dynamic.NewForConfigOrDie(mgr.GetConfig()),
+		GlobalNetDSDel: false,
 	}).SetupWithManager(mgr); err != nil {
 		return err
 	}
