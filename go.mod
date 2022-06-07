@@ -3,7 +3,7 @@ module github.com/submariner-io/submariner-operator
 go 1.16
 
 require (
-	github.com/AlecAivazis/survey/v2 v2.3.4
+	github.com/AlecAivazis/survey/v2 v2.3.5
 	github.com/Azure/go-autorest/autorest v0.11.24 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d // indirect
 	github.com/coreos/go-semver v0.3.0
